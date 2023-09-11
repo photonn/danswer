@@ -55,10 +55,10 @@ export const Header: React.FC<HeaderProps> = ({ user }) => {
       <div className="mx-8 flex">
         <Link href="/">
           <div className="flex">
-            <div className="h-[32px] w-[30px]">
-              <Image src="/logo.png" alt="Logo" width="1419" height="1520" />
+            <div className="h-[20px] w-[57px] mr-2 mt-2">
+              <Image src="/logo-epam.svg" alt="Logo" width="57" height="20" />
             </div>
-            <h1 className="flex text-2xl font-bold my-auto">Danswer</h1>
+            <h1 className="flex text-2xl font-bold my-auto">AIDA LLM Semantic Search</h1>
           </div>
         </Link>
 
@@ -67,7 +67,7 @@ export const Header: React.FC<HeaderProps> = ({ user }) => {
           onClick={() => setDropdownOpen(!dropdownOpen)}
           ref={dropdownRef}
         >
-          <UserCircle size={24} className="mr-1 hover:text-red-500" />
+          <UserCircle size={24} className="mr-1 hover:text-blue-500" />
           {dropdownOpen && (
             <div
               className={

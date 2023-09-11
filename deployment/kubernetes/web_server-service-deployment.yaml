@@ -27,10 +27,14 @@ spec:
     spec:
       containers:
       - name: web-server
-        image: danswer/danswer-web-server:latest
-        imagePullPolicy: IfNotPresent
+        #image: danswer/danswer-web-server:latest
+        image: dialdemoacr.azurecr.io/danswer-web-server:latest
+        #imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - containerPort: 3000
         env:
         - name: INTERNAL_URL
           value: "http://api-server-service:80"
+        - name: DISABLE_AUTH
+          value: "True"

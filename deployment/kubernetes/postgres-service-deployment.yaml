@@ -40,6 +40,8 @@ spec:
             secretKeyRef:
               name: danswer-secrets
               key: postgres_password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
         ports:
         - containerPort: 5432
         volumeMounts:

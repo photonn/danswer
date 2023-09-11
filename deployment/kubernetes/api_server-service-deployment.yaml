@@ -40,12 +40,25 @@ spec:
         ports:
         - containerPort: 8080
         env:
-        - name: AUTH_TYPE
-          value: google_oauth
+        - name: DISABLE_AUTH
+          value: "True"
         - name: POSTGRES_HOST
           value: relational-db-service
         - name: VESPA_HOST
           value: document-index-service
+        - name: API_BASE_OPENAI
+          value: http://dial-proxy.dial.svc.cluster.local
+        - name: API_TYPE_OPENAI
+          value: "azure"
+        - name: API_VERSION_OPENAI
+          value: "2023-03-15-preview"
+        - name: AZURE_DEPLOYMENT_ID
+          value: "gpt-4"
+        - name: GEN_AI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: danswer-secrets
+              key: gen_ai_api_key
         - name: GOOGLE_OAUTH_CLIENT_ID
           valueFrom:
             secretKeyRef:

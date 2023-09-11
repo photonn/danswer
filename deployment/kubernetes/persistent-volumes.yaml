@@ -4,7 +4,8 @@ metadata:
   name: dynamic-pvc
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
+  storageClassName: azurefile
   resources:
     requests:
       storage: 1Gi
@@ -15,7 +16,8 @@ metadata:
   name: file-connector-pvc
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
+  storageClassName: azurefile
   resources:
     requests:
       storage: 1Gi
