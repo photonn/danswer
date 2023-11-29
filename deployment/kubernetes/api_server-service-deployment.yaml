@@ -40,8 +40,8 @@ spec:
         ports:
         - containerPort: 8080
         env:
-        - name: DISABLE_AUTH
-          value: "True"
+        - name: AUTH_TYPE
+          value: "disabled"
         - name: POSTGRES_HOST
           value: relational-db-service
         - name: VESPA_HOST

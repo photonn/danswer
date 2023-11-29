@@ -4,12 +4,12 @@ metadata:
   name: aagic-ingress
   annotations:
     kubernetes.io/ingress.class: azure/application-gateway
-    appgw.ingress.kubernetes.io/ssl-redirect: "true"
+    # appgw.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
-  tls:
-  - hosts:
-    - semantic-search.dial-demo.lab.epam.com
-    secretName: dial-demo-tls-secret
+  # tls:
+  # - hosts:
+  #   - semantic-search.dial-demo.lab.epam.com
+  #   secretName: dial-demo-tls-secret
   rules:
   - host: semantic-search.dial-demo.lab.epam.com
     http:
