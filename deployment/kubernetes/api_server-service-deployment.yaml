@@ -40,35 +40,29 @@ spec:
         ports:
         - containerPort: 8080
         env:
+        - name: WEB_DOMAIN
+          value: "http://semantic-search.dial-demo.lab.epam.com"
         - name: AUTH_TYPE
           value: "disabled"
-        - name: POSTGRES_HOST
-          value: relational-db-service
-        - name: VESPA_HOST
-          value: document-index-service
-        - name: API_BASE_OPENAI
-          value: http://dial-proxy.dial.svc.cluster.local
-        - name: API_TYPE_OPENAI
+        - name: GEN_AI_MODEL_PROVIDER
           value: "azure"
-        - name: API_VERSION_OPENAI
-          value: "2023-03-15-preview"
-        - name: AZURE_DEPLOYMENT_ID
+        - name: GEN_AI_MODEL_VERSION
           value: "gpt-4"
+        - name: GEN_AI_API_ENDPOINT
+          value: "http://dial-proxy.dial.svc.cluster.local"
+        - name: GEN_AI_API_VERSION
+          value: "2023-05-15"
         - name: GEN_AI_API_KEY
           valueFrom:
             secretKeyRef:
               name: danswer-secrets
               key: gen_ai_api_key
-        - name: GOOGLE_OAUTH_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: danswer-secrets
-              key: google_oauth_client_id
-        - name: GOOGLE_OAUTH_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: danswer-secrets
-              key: google_oauth_client_secret
+        - name: FAST_GEN_AI_MODEL_VERSION
+          value: "gpt-35-turbo"
+        - name: POSTGRES_HOST
+          value: relational-db-service
+        - name: VESPA_HOST
+          value: document-index-service
         volumeMounts:
         - name: dynamic-storage
           mountPath: /home/storage
