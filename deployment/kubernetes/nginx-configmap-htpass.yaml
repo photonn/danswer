@@ -3,5 +3,5 @@ kind: ConfigMap
 metadata:
   name: nginx-configmap-htpass
 data:
-  htpass: | 
+  .htpasswd: | 
     danswer:$apr1$wXVcinNZ$zhXDIurzNFtwL1zfrfKvd.

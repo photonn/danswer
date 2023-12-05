@@ -42,7 +42,7 @@ spec:
         - name: nginx-conf
           mountPath: /etc/nginx/conf.d
         - name: nginx-conf-htpass
-          mountPath: /etc/nginx/conf.d/.htpasswd
+          mountPath: /etc/nginx/conf.d/htpass
         command:
         - /bin/sh
         - -c
