@@ -18,6 +18,7 @@ import { HealthCheckBanner } from "@/components/health/healthcheck";
 import { ConnectorIndexingStatus, WebConfig } from "@/lib/types";
 import { ConnectorsTable } from "@/components/admin/connectors/table/ConnectorsTable";
 import { ConnectorForm } from "@/components/admin/connectors/ConnectorForm";
+import { createCredential, linkCredential } from "@/lib/credential";
 
 const SCRAPE_TYPE_TO_PRETTY_NAME = {
   recursive: "Recursive",
@@ -62,35 +63,45 @@ export default function Web() {
         <ConnectorForm<WebConfig>
           nameBuilder={(values) => `WebConnector-${values.base_url}`}
           ccPairNameBuilder={(values) => values.base_url}
-          credentialId={0} // 0 is the ID of the default public credential
+          // Since there is no "real" credential associated with a web connector
+          // we create a dummy one here so that we can associate the CC Pair with a
+          // user. This is needed since the user for a CC Pair is found via the credential
+          // associated with it.
+          shouldCreateEmptyCredentialForConnector={true}
           source="web"
           inputType="load_state"
           formBody={
             <>
-              <TextFormField name="base_url" label="URL to Index:" />
-              <SelectorFormField
-                name="web_connector_type"
-                label="Scrape Method:"
-                options={[
-                  {
-                    name: "Recursive",
-                    value: "recursive",
-                    description:
-                      "Recursively index all pages that share the same base URL.",
-                  },
-                  {
-                    name: "Single Page",
-                    value: "single",
-                    description: "Index only the specified page.",
-                  },
-                  {
-                    name: "Sitemap",
-                    value: "sitemap",
-                    description:
-                      "Assumes the URL to Index points to a Sitemap. Will try and index all pages that are a mentioned in the sitemap.",
-                  },
-                ]}
+              <TextFormField
+                name="base_url"
+                label="URL to Index:"
+                autoCompleteDisabled={false}
               />
+              <div className="w-full">
+                <SelectorFormField
+                  name="web_connector_type"
+                  label="Scrape Method:"
+                  options={[
+                    {
+                      name: "Recursive",
+                      value: "recursive",
+                      description:
+                        "Recursively index all pages that share the same base URL.",
+                    },
+                    {
+                      name: "Single Page",
+                      value: "single",
+                      description: "Index only the specified page.",
+                    },
+                    {
+                      name: "Sitemap",
+                      value: "sitemap",
+                      description:
+                        "Assumes the URL to Index points to a Sitemap. Will try and index all pages that are a mentioned in the sitemap.",
+                    },
+                  ]}
+                />
+              </div>
             </>
           }
           validationSchema={Yup.object().shape({

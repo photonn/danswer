@@ -4,8 +4,8 @@ from danswer.search.models import QueryFlow
 from danswer.search.models import SearchType
 from danswer.search.search_nlp_models import get_default_tokenizer
 from danswer.search.search_nlp_models import IntentModel
-from danswer.search.search_runner import remove_stop_words
-from danswer.server.models import HelperResponse
+from danswer.search.search_runner import remove_stop_words_and_punctuation
+from danswer.server.chat.models import HelperResponse
 from danswer.utils.logger import setup_logger
 from danswer.utils.timing import log_function_time
 
@@ -67,7 +67,7 @@ def recommend_search_flow(
 
     # Heuristics based decisions
     words = query.split()
-    non_stopwords = remove_stop_words(query)
+    non_stopwords = remove_stop_words_and_punctuation(query)
     non_stopword_percent = len(non_stopwords) / len(words)
 
     # UNK tokens -> suggest Keyword (still may be valid QA)

@@ -1,36 +1,27 @@
+import string
 from collections.abc import Callable
 from collections.abc import Iterator
-from copy import deepcopy
 from typing import cast
 
 import numpy
 from nltk.corpus import stopwords  # type:ignore
 from nltk.stem import WordNetLemmatizer  # type:ignore
 from nltk.tokenize import word_tokenize  # type:ignore
-from sqlalchemy.orm import Session
 
-from danswer.configs.app_configs import DISABLE_LLM_CHUNK_FILTER
 from danswer.configs.app_configs import HYBRID_ALPHA
 from danswer.configs.app_configs import MULTILINGUAL_QUERY_EXPANSION
 from danswer.configs.app_configs import NUM_RERANKED_RESULTS
 from danswer.configs.model_configs import ASYM_QUERY_PREFIX
 from danswer.configs.model_configs import CROSS_ENCODER_RANGE_MAX
 from danswer.configs.model_configs import CROSS_ENCODER_RANGE_MIN
-from danswer.configs.model_configs import ENABLE_RERANKING_REAL_TIME_FLOW
 from danswer.configs.model_configs import SIM_SCORE_RANGE_HIGH
 from danswer.configs.model_configs import SIM_SCORE_RANGE_LOW
-from danswer.configs.model_configs import SKIP_RERANKING
-from danswer.db.feedback import create_query_event
-from danswer.db.feedback import update_query_event_retrieved_documents
-from danswer.db.models import User
 from danswer.document_index.document_index_utils import (
     translate_boost_count_to_multiplier,
 )
 from danswer.document_index.interfaces import DocumentIndex
 from danswer.indexing.models import InferenceChunk
-from danswer.search.access_filters import build_access_filters_for_user
 from danswer.search.models import ChunkMetric
-from danswer.search.models import IndexFilters
 from danswer.search.models import MAX_METRICS_CONTENT
 from danswer.search.models import RerankMetricsContainer
 from danswer.search.models import RetrievalMetricsContainer
@@ -40,8 +31,7 @@ from danswer.search.search_nlp_models import CrossEncoderEnsembleModel
 from danswer.search.search_nlp_models import EmbeddingModel
 from danswer.secondary_llm_flows.chunk_usefulness import llm_batch_eval_chunks
 from danswer.secondary_llm_flows.query_expansion import rephrase_query
-from danswer.server.models import QuestionRequest
-from danswer.server.models import SearchDoc
+from danswer.server.chat.models import SearchDoc
 from danswer.utils.logger import setup_logger
 from danswer.utils.threadpool_concurrency import FunctionCall
 from danswer.utils.threadpool_concurrency import run_functions_in_parallel
@@ -65,17 +55,21 @@ def lemmatize_text(text: str) -> list[str]:
     return [lemmatizer.lemmatize(word) for word in word_tokens]
 
 
-def remove_stop_words(text: str) -> list[str]:
+def remove_stop_words_and_punctuation(text: str) -> list[str]:
     stop_words = set(stopwords.words("english"))
     word_tokens = word_tokenize(text)
-    text_trimmed = [word for word in word_tokens if word.casefold() not in stop_words]
+    text_trimmed = [
+        word
+        for word in word_tokens
+        if (word.casefold() not in stop_words and word not in string.punctuation)
+    ]
     return text_trimmed or word_tokens
 
 
 def query_processing(
     query: str,
 ) -> str:
-    query = " ".join(remove_stop_words(query))
+    query = " ".join(remove_stop_words_and_punctuation(query))
     query = " ".join(lemmatize_text(query))
     return query
 
@@ -338,6 +332,12 @@ def apply_boost(
     return final_chunks
 
 
+def _simplify_text(text: str) -> str:
+    return "".join(
+        char for char in text if char not in string.punctuation and not char.isspace()
+    ).lower()
+
+
 def retrieve_chunks(
     query: SearchQuery,
     document_index: DocumentIndex,
@@ -353,14 +353,22 @@ def retrieve_chunks(
             query=query, document_index=document_index, hybrid_alpha=hybrid_alpha
         )
     else:
+        simplified_queries = set()
         run_queries: list[tuple[Callable, tuple]] = []
+
         # Currently only uses query expansion on multilingual use cases
         query_rephrases = rephrase_query(query.query, multilingual_query_expansion)
         # Just to be extra sure, add the original query.
         query_rephrases.append(query.query)
         for rephrase in set(query_rephrases):
-            q_copy = deepcopy(query)
-            q_copy.query = rephrase
+            # Sometimes the model rephrases the query in the same language with minor changes
+            # Avoid doing an extra search with the minor changes as this biases the results
+            simplified_rephrase = _simplify_text(rephrase)
+            if simplified_rephrase in simplified_queries:
+                continue
+            simplified_queries.add(simplified_rephrase)
+
+            q_copy = query.copy(update={"query": rephrase}, deep=True)
             run_queries.append(
                 (doc_index_retrieval, (q_copy, document_index, hybrid_alpha))
             )
@@ -547,112 +555,9 @@ def full_chunk_search_generator(
         else None,
     )
     if llm_chunk_selection is not None:
-        yield [chunk.unique_id in llm_chunk_selection for chunk in retrieved_chunks]
+        yield [
+            chunk.unique_id in llm_chunk_selection
+            for chunk in reranked_chunks or retrieved_chunks
+        ]
     else:
         yield [True for _ in reranked_chunks or retrieved_chunks]
-
-
-def danswer_search_generator(
-    question: QuestionRequest,
-    user: User | None,
-    db_session: Session,
-    document_index: DocumentIndex,
-    skip_llm_chunk_filter: bool = DISABLE_LLM_CHUNK_FILTER,
-    skip_rerank_realtime: bool = not ENABLE_RERANKING_REAL_TIME_FLOW,
-    skip_rerank_non_realtime: bool = SKIP_RERANKING,
-    bypass_acl: bool = False,
-    retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None]
-    | None = None,
-    rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
-) -> Iterator[list[InferenceChunk] | list[bool] | int]:
-    """The main entry point for search. This fetches the relevant documents from Vespa
-    based on the provided query (applying permissions / filters), does any specified
-    post-processing, and returns the results. It also creates an entry in the query_event table
-    for this search event."""
-    query_event_id = create_query_event(
-        query=question.query,
-        search_type=question.search_type,
-        llm_answer=None,
-        user_id=user.id if user is not None else None,
-        db_session=db_session,
-    )
-
-    user_acl_filters = (
-        None if bypass_acl else build_access_filters_for_user(user, db_session)
-    )
-    final_filters = IndexFilters(
-        source_type=question.filters.source_type,
-        document_set=question.filters.document_set,
-        time_cutoff=question.filters.time_cutoff,
-        access_control_list=user_acl_filters,
-    )
-
-    skip_reranking = (
-        skip_rerank_realtime if question.real_time else skip_rerank_non_realtime
-    )
-
-    search_query = SearchQuery(
-        query=question.query,
-        search_type=question.search_type,
-        filters=final_filters,
-        # Still applies time decay but not magnified
-        favor_recent=question.favor_recent
-        if question.favor_recent is not None
-        else False,
-        skip_rerank=skip_reranking,
-        skip_llm_chunk_filter=skip_llm_chunk_filter,
-    )
-
-    search_generator = full_chunk_search_generator(
-        query=search_query,
-        document_index=document_index,
-        retrieval_metrics_callback=retrieval_metrics_callback,
-        rerank_metrics_callback=rerank_metrics_callback,
-    )
-    top_chunks = cast(list[InferenceChunk], next(search_generator))
-    yield top_chunks
-
-    llm_chunk_selection = cast(list[bool], next(search_generator))
-    yield llm_chunk_selection
-
-    update_query_event_retrieved_documents(
-        db_session=db_session,
-        retrieved_document_ids=[doc.document_id for doc in top_chunks]
-        if top_chunks
-        else [],
-        query_id=query_event_id,
-        user_id=None if user is None else user.id,
-    )
-    yield query_event_id
-
-
-def danswer_search(
-    question: QuestionRequest,
-    user: User | None,
-    db_session: Session,
-    document_index: DocumentIndex,
-    skip_llm_chunk_filter: bool = DISABLE_LLM_CHUNK_FILTER,
-    bypass_acl: bool = False,
-    retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None]
-    | None = None,
-    rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
-) -> tuple[list[InferenceChunk], list[bool], int]:
-    """Returns a tuple of the top chunks, the LLM relevance filter results, and the query event ID.
-
-    Presents a simpler interface than the underlying `danswer_search_generator`, as callers no
-    longer need to worry about the order / have nicer typing. This should be used for flows which
-    do not require streaming."""
-    search_generator = danswer_search_generator(
-        question=question,
-        user=user,
-        db_session=db_session,
-        document_index=document_index,
-        skip_llm_chunk_filter=skip_llm_chunk_filter,
-        bypass_acl=bypass_acl,
-        retrieval_metrics_callback=retrieval_metrics_callback,
-        rerank_metrics_callback=rerank_metrics_callback,
-    )
-    top_chunks = cast(list[InferenceChunk], next(search_generator))
-    llm_chunk_selection = cast(list[bool], next(search_generator))
-    query_event_id = cast(int, next(search_generator))
-    return top_chunks, llm_chunk_selection, query_event_id

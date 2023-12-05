@@ -1,3 +1,5 @@
+# The following prompts are used for the initial response before a chat history exists
+# It is used also for the one shot direct QA flow
 import json
 
 from danswer.prompts.constants import ANSWER_PAT
@@ -90,18 +92,19 @@ You MUST respond in the following format:
 
 
 # For weak LLM which only takes one chunk and cannot output json
+# Also not requiring quotes as it tends to not work
 WEAK_LLM_PROMPT = f"""
-Respond to the user query using a reference document.
-{GENERAL_SEP_PAT}
+Respond to the user query using the following reference document.
+
 Reference Document:
+{GENERAL_SEP_PAT}
 {{single_reference_doc}}
 {GENERAL_SEP_PAT}
-Answer the user query below based on the reference document above.
-Respond with an "{ANSWER_PAT}" section and as many "{QUOTE_PAT}" sections as needed to support \
-the answer.'
 
-{QUESTION_PAT.upper()} {{user_query}}
-{ANSWER_PAT.upper()}
+Answer the user query below based on the reference document above.
+
+{QUESTION_PAT.upper()}
+{{user_query}}
 """.strip()
 
 
@@ -115,6 +118,23 @@ as many "{QUOTE_PAT}" sections as needed to support the answer.
 Answer the user query based on the following document:
 
 {{first_chunk_content}}
+""".strip()
+
+
+# Paramaterized prompt which allows the user to specify their
+# own system / task prompt
+PARAMATERIZED_PROMPT = f"""
+{{system_prompt}}
+
+CONTEXT:
+{GENERAL_SEP_PAT}
+{{context_docs_str}}
+{GENERAL_SEP_PAT}
+
+{{task_prompt}}
+
+{QUESTION_PAT.upper()} {{user_query}}
+RESPONSE:
 """.strip()
 
 

@@ -8,9 +8,11 @@ from typing import IO
 
 from danswer.configs.app_configs import INDEX_BATCH_SIZE
 from danswer.configs.constants import DocumentSource
+from danswer.connectors.cross_connector_utils.file_utils import detect_encoding
 from danswer.connectors.cross_connector_utils.file_utils import load_files_from_zip
 from danswer.connectors.cross_connector_utils.file_utils import read_file
 from danswer.connectors.cross_connector_utils.file_utils import read_pdf_file
+from danswer.connectors.cross_connector_utils.miscellaneous_utils import time_str_to_utc
 from danswer.connectors.file.utils import check_file_ext_is_valid
 from danswer.connectors.file.utils import get_file_ext
 from danswer.connectors.interfaces import GenerateDocumentsOutput
@@ -31,11 +33,12 @@ def _open_files_at_location(
     if extension == ".zip":
         for file_info, file in load_files_from_zip(file_path, ignore_dirs=True):
             yield file_info.filename, file
-    elif extension in [".txt", ".pdf", ".md", ".mdx"]:
-        mode = "r"
-        if extension == ".pdf":
-            mode = "rb"
-        with open(file_path, mode) as file:
+    elif extension in [".txt", ".md", ".mdx"]:
+        encoding = detect_encoding(file_path)
+        with open(file_path, "r", encoding=encoding, errors="replace") as file:
+            yield os.path.basename(file_path), file
+    elif extension == ".pdf":
+        with open(file_path, "rb") as file:
             yield os.path.basename(file_path), file
     else:
         logger.warning(f"Skipping file '{file_path}' with extension '{extension}'")
@@ -61,15 +64,20 @@ def _process_file(
     else:
         file_content_raw, metadata = read_file(file)
 
+    dt_str = metadata.get("doc_updated_at")
+    final_time_updated = time_str_to_utc(dt_str) if dt_str else time_updated
+
     return [
         Document(
             id=file_name,
             sections=[
-                Section(link=metadata.get("link", None), text=file_content_raw.strip())
+                Section(link=metadata.get("link"), text=file_content_raw.strip())
             ],
             source=DocumentSource.FILE,
             semantic_identifier=file_name,
-            doc_updated_at=time_updated,
+            doc_updated_at=final_time_updated,
+            primary_owners=metadata.get("primary_owners"),
+            secondary_owners=metadata.get("secondary_owners"),
             metadata={},
         )
     ]

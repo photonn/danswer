@@ -35,6 +35,7 @@ import {
   FiBookmark,
   FiCpu,
   FiInfo,
+  FiUploadCloud,
 } from "react-icons/fi";
 import { SiBookstack } from "react-icons/si";
 import Image from "next/image";
@@ -49,6 +50,7 @@ import hubSpotIcon from "../../../public/HubSpot.png";
 import document360Icon from "../../../public/Document360.png";
 import googleSitesIcon from "../../../public/GoogleSites.png";
 import zendeskIcon from "../../../public/Zendesk.svg";
+import { FaRobot } from "react-icons/fa";
 
 interface IconProps {
   size?: number;
@@ -279,6 +281,20 @@ export const CPUIcon = ({
   className = defaultTailwindCSS,
 }: IconProps) => {
   return <FiCpu size={size} className={className} />;
+};
+
+export const RobotIcon = ({
+  size = 16,
+  className = defaultTailwindCSS,
+}: IconProps) => {
+  return <FaRobot size={size} className={className} />;
+};
+
+export const ConnectorIcon = ({
+  size = 16,
+  className = defaultTailwindCSS,
+}: IconProps) => {
+  return <FiUploadCloud size={size} className={className} />;
 };
 
 //

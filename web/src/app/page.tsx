@@ -1,34 +1,29 @@
 import { SearchSection } from "@/components/search/SearchSection";
 import { Header } from "@/components/Header";
-import {
-  getAuthDisabledSS,
-  getCurrentUserSS,
-  processCookies,
-} from "@/lib/userSS";
+import { getAuthDisabledSS, getCurrentUserSS } from "@/lib/userSS";
 import { redirect } from "next/navigation";
 import { HealthCheckBanner } from "@/components/health/healthcheck";
 import { ApiKeyModal } from "@/components/openai/ApiKeyModal";
-import { buildUrl } from "@/lib/utilsSS";
+import { fetchSS } from "@/lib/utilsSS";
 import { Connector, DocumentSet, User } from "@/lib/types";
 import { cookies } from "next/headers";
 import { SearchType } from "@/lib/search/interfaces";
+import { Persona } from "./admin/personas/interfaces";
+import { WelcomeModal } from "@/components/WelcomeModal";
+import { unstable_noStore as noStore } from "next/cache";
 
 export default async function Home() {
+  // Disable caching so we always get the up to date connector / document set / persona info
+  // importantly, this prevents users from adding a connector, going back to the main page,
+  // and then getting hit with a "No Connectors" popup
+  noStore();
+
   const tasks = [
     getAuthDisabledSS(),
     getCurrentUserSS(),
-    fetch(buildUrl("/manage/connector"), {
-      next: { revalidate: 0 },
-      headers: {
-        cookie: processCookies(cookies()),
-      },
-    }),
-    fetch(buildUrl("/manage/document-set"), {
-      next: { revalidate: 0 },
-      headers: {
-        cookie: processCookies(cookies()),
-      },
-    }),
+    fetchSS("/manage/connector"),
+    fetchSS("/manage/document-set"),
+    fetchSS("/persona"),
   ];
 
   // catch cases where the backend is completely unreachable here
@@ -44,6 +39,7 @@ export default async function Home() {
   const user = results[1] as User | null;
   const connectorsResponse = results[2] as Response | null;
   const documentSetsResponse = results[3] as Response | null;
+  const personaResponse = results[4] as Response | null;
 
   if (!authDisabled && !user) {
     return redirect("/auth/login");
@@ -65,6 +61,13 @@ export default async function Home() {
     );
   }
 
+  let personas: Persona[] = [];
+  if (personaResponse?.ok) {
+    personas = await personaResponse.json();
+  } else {
+    console.log(`Failed to fetch personas - ${personaResponse?.status}`);
+  }
+
   // needs to be done in a non-client side component due to nextjs
   const storedSearchType = cookies().get("searchType")?.value as
     | string
@@ -82,11 +85,13 @@ export default async function Home() {
         <HealthCheckBanner />
       </div>
       <ApiKeyModal />
+      {connectors.length === 0 && connectorsResponse?.ok && <WelcomeModal />}
       <div className="px-24 pt-10 flex flex-col items-center min-h-screen bg-gray-900 text-gray-100">
         <div className="w-full">
           <SearchSection
             connectors={connectors}
             documentSets={documentSets}
+            personas={personas}
             defaultSearchType={searchTypeDefault}
           />
         </div>

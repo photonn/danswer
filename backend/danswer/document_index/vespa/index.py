@@ -47,6 +47,9 @@ from danswer.configs.constants import SOURCE_LINKS
 from danswer.configs.constants import SOURCE_TYPE
 from danswer.configs.constants import TITLE
 from danswer.configs.model_configs import SEARCH_DISTANCE_CUTOFF
+from danswer.connectors.cross_connector_utils.miscellaneous_utils import (
+    get_experts_stores_representations,
+)
 from danswer.document_index.document_index_utils import get_uuid_from_chunk
 from danswer.document_index.interfaces import DocumentIndex
 from danswer.document_index.interfaces import DocumentInsertionRecord
@@ -57,7 +60,7 @@ from danswer.indexing.models import InferenceChunk
 from danswer.search.models import IndexFilters
 from danswer.search.search_runner import embed_query
 from danswer.search.search_runner import query_processing
-from danswer.search.search_runner import remove_stop_words
+from danswer.search.search_runner import remove_stop_words_and_punctuation
 from danswer.utils.batching import batch_generator
 from danswer.utils.logger import setup_logger
 
@@ -240,8 +243,8 @@ def _index_vespa_chunk(chunk: DocMetadataAwareIndexChunk) -> None:
         EMBEDDINGS: embeddings_name_vector_map,
         BOOST: DEFAULT_BOOST,
         DOC_UPDATED_AT: _vespa_get_updated_at_attribute(document.doc_updated_at),
-        PRIMARY_OWNERS: document.primary_owners,
-        SECONDARY_OWNERS: document.secondary_owners,
+        PRIMARY_OWNERS: get_experts_stores_representations(document.primary_owners),
+        SECONDARY_OWNERS: get_experts_stores_representations(document.secondary_owners),
         # the only `set` vespa has is `weightedset`, so we have to give each
         # element an arbitrary weight
         ACCESS_CONTROL_LIST: {acl_entry: 1 for acl_entry in chunk.access.to_acl()},
@@ -471,6 +474,13 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
         logger.error(
             f"Chunk with blurb: {fields.get(BLURB, 'Unknown')[:50]}... has no Semantic Identifier"
         )
+
+    # User ran into this, not sure why this could happen, error checking here
+    blurb = fields.get(BLURB)
+    if not blurb:
+        logger.error(f"Chunk with id {fields.get(semantic_identifier)} ")
+        blurb = ""
+
     source_links = fields.get(SOURCE_LINKS, {})
     source_links_dict_unprocessed = (
         json.loads(source_links) if isinstance(source_links, str) else source_links
@@ -482,7 +492,7 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
 
     return InferenceChunk(
         chunk_id=fields[CHUNK_ID],
-        blurb=fields[BLURB],
+        blurb=blurb,
         content=fields[CONTENT],
         source_links=source_links_dict,
         section_continuation=fields[SECTION_CONTINUATION],
@@ -493,6 +503,8 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
         recency_bias=fields["matchfeatures"][RECENCY_BIAS],
         score=hit["relevance"],
         hidden=fields.get(HIDDEN, False),
+        primary_owners=fields.get(PRIMARY_OWNERS),
+        secondary_owners=fields.get(SECONDARY_OWNERS),
         metadata=metadata,
         match_highlights=match_highlights,
         updated_at=updated_at,
@@ -551,6 +563,8 @@ class VespaIndex(DocumentIndex):
         f"{BOOST}, "
         f"{HIDDEN}, "
         f"{DOC_UPDATED_AT}, "
+        f"{PRIMARY_OWNERS}, "
+        f"{SECONDARY_OWNERS}, "
         f"{METADATA}, "
         f"{CONTENT_SUMMARY} "
         f"from {DOCUMENT_INDEX_NAME} where "
@@ -725,7 +739,9 @@ class VespaIndex(DocumentIndex):
         query_embedding = embed_query(query)
 
         query_keywords = (
-            " ".join(remove_stop_words(query)) if edit_keyword_query else query
+            " ".join(remove_stop_words_and_punctuation(query))
+            if edit_keyword_query
+            else query
         )
 
         params: dict[str, str | int] = {
@@ -766,7 +782,9 @@ class VespaIndex(DocumentIndex):
         query_embedding = embed_query(query)
 
         query_keywords = (
-            " ".join(remove_stop_words(query)) if edit_keyword_query else query
+            " ".join(remove_stop_words_and_punctuation(query))
+            if edit_keyword_query
+            else query
         )
 
         params: dict[str, str | int | float] = {

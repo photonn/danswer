@@ -4,6 +4,7 @@ from typing import Any
 from typing import List
 from typing import Literal
 from typing import NotRequired
+from typing import Optional
 from typing import TypedDict
 from uuid import UUID
 
@@ -64,6 +65,11 @@ class Base(DeclarativeBase):
     pass
 
 
+"""
+Auth/Authz (users, permissions, access) Tables
+"""
+
+
 class OAuthAccount(SQLAlchemyBaseOAuthAccountTableUUID, Base):
     # even an almost empty token from keycloak will not fit the default 1024 bytes
     access_token: Mapped[str] = mapped_column(Text, nullable=False)  # type: ignore
@@ -92,7 +98,7 @@ class AccessToken(SQLAlchemyBaseAccessTokenTableUUID, Base):
 
 
 """
-Association tables
+Association Tables
 NOTE: must be at the top since they are referenced by other tables
 """
 
@@ -182,6 +188,49 @@ class ConnectorCredentialPair(Base):
         secondary=DocumentSet__ConnectorCredentialPair.__table__,
         back_populates="connector_credential_pairs",
         overlaps="document_set",
+    )
+
+
+"""
+Documents/Indexing Tables
+"""
+
+
+class Document(Base):
+    __tablename__ = "document"
+
+    # this should correspond to the ID of the document
+    # (as is passed around in Danswer)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    from_ingestion_api: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=True
+    )
+    # 0 for neutral, positive for mostly endorse, negative for mostly reject
+    boost: Mapped[int] = mapped_column(Integer, default=DEFAULT_BOOST)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    semantic_id: Mapped[str] = mapped_column(String)
+    # First Section's link
+    link: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The updated time is also used as a measure of the last successful state of the doc
+    # pulled from the source (to help skip reindexing already updated docs in case of
+    # connector retries)
+    doc_updated_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The following are not attached to User because the account/email may not be known
+    # within Danswer
+    # Something like the document creator
+    primary_owners: Mapped[list[str] | None] = mapped_column(
+        postgresql.ARRAY(String), nullable=True
+    )
+    # Something like assignee or space owner
+    secondary_owners: Mapped[list[str] | None] = mapped_column(
+        postgresql.ARRAY(String), nullable=True
+    )
+    # TODO if more sensitive data is added here for display, make sure to add user/group permission
+
+    retrieval_feedbacks: Mapped[List["DocumentRetrievalFeedback"]] = relationship(
+        "DocumentRetrievalFeedback", back_populates="document"
     )
 
 
@@ -315,8 +364,7 @@ class IndexAttempt(Base):
 
 
 class DocumentByConnectorCredentialPair(Base):
-    """Represents an indexing of a document by a specific connector / credential
-    pair"""
+    """Represents an indexing of a document by a specific connector / credential pair"""
 
     __tablename__ = "document_by_connector_credential_pair"
 
@@ -337,10 +385,20 @@ class DocumentByConnectorCredentialPair(Base):
     )
 
 
+"""
+Messages Tables
+"""
+
+
 class QueryEvent(Base):
     __tablename__ = "query_event"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # TODO: make this non-nullable after migration to consolidate chat /
+    # QA flows is complete
+    chat_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_session.id"), nullable=True
+    )
     query: Mapped[str] = mapped_column(Text)
     # search_flow refers to user selection, None if user used auto
     selected_search_flow: Mapped[SearchType | None] = mapped_column(
@@ -368,97 +426,14 @@ class QueryEvent(Base):
     )
 
 
-class DocumentRetrievalFeedback(Base):
-    __tablename__ = "document_retrieval_feedback"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    qa_event_id: Mapped[int] = mapped_column(
-        ForeignKey("query_event.id"),
-    )
-    document_id: Mapped[str] = mapped_column(
-        ForeignKey("document.id"),
-    )
-    # How high up this document is in the results, 1 for first
-    document_rank: Mapped[int] = mapped_column(Integer)
-    clicked: Mapped[bool] = mapped_column(Boolean, default=False)
-    feedback: Mapped[SearchFeedbackType | None] = mapped_column(
-        Enum(SearchFeedbackType), nullable=True
-    )
-
-    qa_event: Mapped[QueryEvent] = relationship(
-        "QueryEvent", back_populates="document_feedbacks"
-    )
-    document: Mapped["Document"] = relationship(
-        "Document", back_populates="retrieval_feedbacks"
-    )
-
-
-class Document(Base):
-    __tablename__ = "document"
-
-    # this should correspond to the ID of the document
-    # (as is passed around in Danswer)
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    from_ingestion_api: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=True
-    )
-    # 0 for neutral, positive for mostly endorse, negative for mostly reject
-    boost: Mapped[int] = mapped_column(Integer, default=DEFAULT_BOOST)
-    hidden: Mapped[bool] = mapped_column(Boolean, default=False)
-    semantic_id: Mapped[str] = mapped_column(String)
-    # First Section's link
-    link: Mapped[str | None] = mapped_column(String, nullable=True)
-    # The updated time is also used as a measure of the last successful state of the doc
-    # pulled from the source (to help skip reindexing already updated docs in case of
-    # connector retries)
-    doc_updated_at: Mapped[datetime.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    # The following are not attached to User because the account/email may not be known
-    # within Danswer
-    # Something like the document creator
-    primary_owners: Mapped[list[str] | None] = mapped_column(
-        postgresql.ARRAY(String), nullable=True
-    )
-    # Something like assignee or space owner
-    secondary_owners: Mapped[list[str] | None] = mapped_column(
-        postgresql.ARRAY(String), nullable=True
-    )
-    # TODO if more sensitive data is added here for display, make sure to add user/group permission
-
-    retrieval_feedbacks: Mapped[List[DocumentRetrievalFeedback]] = relationship(
-        "DocumentRetrievalFeedback", back_populates="document"
-    )
-
-
-class DocumentSet(Base):
-    __tablename__ = "document_set"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, unique=True)
-    description: Mapped[str] = mapped_column(String)
-    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
-    # whether or not changes to the document set have been propogated
-    is_up_to_date: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-
-    connector_credential_pairs: Mapped[list[ConnectorCredentialPair]] = relationship(
-        "ConnectorCredentialPair",
-        secondary=DocumentSet__ConnectorCredentialPair.__table__,
-        back_populates="document_sets",
-        overlaps="document_set",
-    )
-    personas: Mapped[list["Persona"]] = relationship(
-        "Persona",
-        secondary=Persona__DocumentSet.__table__,
-        back_populates="document_sets",
-    )
-
-
 class ChatSession(Base):
     __tablename__ = "chat_session"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    persona_id: Mapped[int | None] = mapped_column(
+        ForeignKey("persona.id"), default=None
+    )
     description: Mapped[str] = mapped_column(Text)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     # The following texts help build up the model's ability to use the context effectively
@@ -475,48 +450,7 @@ class ChatSession(Base):
     messages: Mapped[List["ChatMessage"]] = relationship(
         "ChatMessage", back_populates="chat_session", cascade="delete"
     )
-
-
-class ToolInfo(TypedDict):
-    name: str
-    description: str
-
-
-class Persona(Base):
-    # TODO introduce user and group ownership for personas
-    __tablename__ = "persona"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String)
-    # Danswer retrieval, treated as a special tool
-    retrieval_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    datetime_aware: Mapped[bool] = mapped_column(Boolean, default=True)
-    system_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    tools: Mapped[list[ToolInfo] | None] = mapped_column(
-        postgresql.JSONB(), nullable=True
-    )
-    hint_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Default personas are configured via backend during deployment
-    # Treated specially (cannot be user edited etc.)
-    default_persona: Mapped[bool] = mapped_column(Boolean, default=False)
-    # If it's updated and no longer latest (should no longer be shown), it is also considered deleted
-    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    document_sets: Mapped[list[DocumentSet]] = relationship(
-        "DocumentSet",
-        secondary=Persona__DocumentSet.__table__,
-        back_populates="personas",
-    )
-
-    # Default personas loaded via yaml cannot have the same name
-    __table_args__ = (
-        Index(
-            "_default_persona_name_idx",
-            "name",
-            unique=True,
-            postgresql_where=(default_persona == True),  # noqa: E712
-        ),
-    )
+    persona: Mapped[Optional["Persona"]] = relationship("Persona")
 
 
 class ChatMessage(Base):
@@ -545,7 +479,37 @@ class ChatMessage(Base):
     )
 
     chat_session: Mapped[ChatSession] = relationship("ChatSession")
-    persona: Mapped[Persona | None] = relationship("Persona")
+    persona: Mapped[Optional["Persona"]] = relationship("Persona")
+
+
+"""
+Feedback, Logging, Metrics Tables
+"""
+
+
+class DocumentRetrievalFeedback(Base):
+    __tablename__ = "document_retrieval_feedback"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    qa_event_id: Mapped[int] = mapped_column(
+        ForeignKey("query_event.id"),
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document.id"),
+    )
+    # How high up this document is in the results, 1 for first
+    document_rank: Mapped[int] = mapped_column(Integer)
+    clicked: Mapped[bool] = mapped_column(Boolean, default=False)
+    feedback: Mapped[SearchFeedbackType | None] = mapped_column(
+        Enum(SearchFeedbackType), nullable=True
+    )
+
+    qa_event: Mapped[QueryEvent] = relationship(
+        "QueryEvent", back_populates="document_feedbacks"
+    )
+    document: Mapped[Document] = relationship(
+        "Document", back_populates="retrieval_feedbacks"
+    )
 
 
 class ChatMessageFeedback(Base):
@@ -581,6 +545,84 @@ class ChatMessageFeedback(Base):
             chat_message_edit_number,
         ],
         backref="feedbacks",
+    )
+
+
+"""
+Structures, Organizational, Configurations Tables
+"""
+
+
+class DocumentSet(Base):
+    __tablename__ = "document_set"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    description: Mapped[str] = mapped_column(String)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    # whether or not changes to the document set have been propagated
+    is_up_to_date: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    connector_credential_pairs: Mapped[list[ConnectorCredentialPair]] = relationship(
+        "ConnectorCredentialPair",
+        secondary=DocumentSet__ConnectorCredentialPair.__table__,
+        back_populates="document_sets",
+        overlaps="document_set",
+    )
+    personas: Mapped[list["Persona"]] = relationship(
+        "Persona",
+        secondary=Persona__DocumentSet.__table__,
+        back_populates="document_sets",
+    )
+
+
+class ToolInfo(TypedDict):
+    name: str
+    description: str
+
+
+class Persona(Base):
+    # TODO introduce user and group ownership for personas
+    __tablename__ = "persona"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Danswer retrieval, treated as a special tool
+    retrieval_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    datetime_aware: Mapped[bool] = mapped_column(Boolean, default=True)
+    system_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tools: Mapped[list[ToolInfo] | None] = mapped_column(
+        postgresql.JSONB(), nullable=True
+    )
+    hint_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # number of chunks to use for retrieval. If unspecified, uses the default set
+    # in the env variables
+    num_chunks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # if unspecified, then uses the default set in the env variables
+    apply_llm_relevance_filter: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True
+    )
+    # Default personas are configured via backend during deployment
+    # Treated specially (cannot be user edited etc.)
+    default_persona: Mapped[bool] = mapped_column(Boolean, default=False)
+    # If it's updated and no longer latest (should no longer be shown), it is also considered deleted
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    document_sets: Mapped[list[DocumentSet]] = relationship(
+        "DocumentSet",
+        secondary=Persona__DocumentSet.__table__,
+        back_populates="personas",
+    )
+
+    # Default personas loaded via yaml cannot have the same name
+    __table_args__ = (
+        Index(
+            "_default_persona_name_idx",
+            "name",
+            unique=True,
+            postgresql_where=(default_persona == True),  # noqa: E712
+        ),
     )
 
 
