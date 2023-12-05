@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-configmap-htpass
+data:
+  htpass: | 
+    danswer:$apr1$wXVcinNZ$zhXDIurzNFtwL1zfrfKvd.

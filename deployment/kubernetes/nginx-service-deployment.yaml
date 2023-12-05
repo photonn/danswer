@@ -41,6 +41,8 @@ spec:
         volumeMounts:
         - name: nginx-conf
           mountPath: /etc/nginx/conf.d
+        - name: nginx-conf-htpass
+          mountPath: /etc/nginx/conf.d/.htpasswd
         command:
         - /bin/sh
         - -c
@@ -50,3 +52,6 @@ spec:
       - name: nginx-conf
         configMap:
           name: nginx-configmap
+      - name: nginx-conf-htpass
+        configMap:
+          name: nginx-configmap-htpass
